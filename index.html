@@ -1,179 +1,143 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Free Instrumental & Piano Maker</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Audio Converter</title>
 
-<!-- Fonts -->
-<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;500;700&family=Pacifico&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&family=Pacifico&display=swap" rel="stylesheet">
 
 <style>
-:root {
-  --neon1:#ff00cc;
-  --neon2:#3333ff;
-  --neon3:#00ffd5;
-}
-
-* {
-  box-sizing: border-box;
-}
-
-body {
+body{
   margin:0;
   min-height:100vh;
-  font-family:'Poppins',sans-serif;
-  color:#fff;
-  overflow-x:hidden;
-  background:linear-gradient(120deg,var(--neon1),var(--neon2),var(--neon3));
+  font-family:Poppins,sans-serif;
+  color:white;
+  background:linear-gradient(270deg,#ff00cc,#3333ff,#00ffd5);
   background-size:600% 600%;
-  animation:bgMove 12s ease infinite;
+  animation:bg 12s ease infinite;
 }
-
-@keyframes bgMove {
+@keyframes bg{
   0%{background-position:0% 50%}
   50%{background-position:100% 50%}
   100%{background-position:0% 50%}
 }
-
-.container {
+.container{
   max-width:420px;
   margin:auto;
   padding:20px;
   text-align:center;
 }
-
-h1 {
-  font-weight:700;
-  font-size:1.4rem;
-  margin-bottom:10px;
-}
-
-p {
-  font-size:0.85rem;
-  opacity:0.9;
-}
-
-input[type=file] {
+button,input{
   width:100%;
-  margin:15px 0;
+  margin:10px 0;
 }
-
-button {
-  width:100%;
+button{
   padding:12px;
-  margin:8px 0;
   border:none;
-  border-radius:25px;
-  font-size:0.9rem;
-  font-weight:500;
-  cursor:pointer;
-  background:rgba(255,255,255,0.15);
-  color:#fff;
-  backdrop-filter:blur(10px);
+  border-radius:20px;
+  background:rgba(255,255,255,.2);
+  color:white;
+  font-size:14px;
 }
-
-button:disabled {
-  opacity:0.4;
-}
-
-audio {
-  width:100%;
-  margin-top:10px;
-}
-
-.footer {
-  margin-top:30px;
-  font-family:'Pacifico',cursive;
-  font-size:0.9rem;
-  opacity:0.8;
+audio{width:100%}
+.footer{
+  margin-top:25px;
+  font-family:Pacifico,cursive;
+  opacity:.8;
 }
 </style>
 </head>
 
 <body>
 <div class="container">
-  <h1>Instrumental & Piano Converter</h1>
-  <p>Free · Browser-only · GitHub Pages compatible</p>
-
-  <input type="file" accept="audio/*" id="audioFile" />
-
-  <button id="instBtn" disabled>Create Instrumental</button>
-  <audio id="instAudio" controls></audio>
-
-  <button id="pianoBtn" disabled>Create Piano Version</button>
-  <audio id="pianoAudio" controls></audio>
-
+  <h2>Instrumental & Piano Converter</h2>
+  <input type="file" id="file" accept="audio/*">
+  <button id="inst" disabled>Create Instrumental</button>
+  <audio id="instOut" controls></audio>
+  <button id="piano" disabled>Create Piano Version</button>
+  <audio id="pianoOut" controls></audio>
   <div class="footer"><i>created by Animesh</i></div>
 </div>
 
 <script>
-const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+const ctx = new AudioContext();
 let buffer;
 
-document.getElementById("audioFile").addEventListener("change", async e => {
-  const file = e.target.files[0];
-  const data = await file.arrayBuffer();
-  buffer = await audioCtx.decodeAudioData(data);
-  document.getElementById("instBtn").disabled = false;
-  document.getElementById("pianoBtn").disabled = false;
-});
+file.onchange = async e=>{
+  const arr = await e.target.files[0].arrayBuffer();
+  buffer = await ctx.decodeAudioData(arr);
+  inst.disabled = piano.disabled = false;
+};
 
-/* -------- Instrumental (simple vocal reduction) -------- */
-document.getElementById("instBtn").onclick = () => {
-  const offline = new OfflineAudioContext(
-    buffer.numberOfChannels,
-    buffer.length,
-    buffer.sampleRate
+/* -------- REAL MID/SIDE VOCAL REDUCTION -------- */
+inst.onclick = ()=>{
+  const off = new OfflineAudioContext(
+    2, buffer.length, buffer.sampleRate
   );
 
-  const source = offline.createBufferSource();
-  source.buffer = buffer;
+  const src = off.createBufferSource();
+  src.buffer = buffer;
 
-  const filter = offline.createBiquadFilter();
-  filter.type = "notch";
-  filter.frequency.value = 1200; // vocal range reduction
+  const splitter = off.createChannelSplitter(2);
+  const merger = off.createChannelMerger(2);
 
-  source.connect(filter);
-  filter.connect(offline.destination);
-  source.start();
+  src.connect(splitter);
 
-  offline.startRendering().then(rendered => {
-    playBuffer(rendered, "instAudio");
-  });
+  // L - R
+  const inv = off.createGain();
+  inv.gain.value = -1;
+
+  splitter.connect(inv,1);
+  splitter.connect(merger,0);
+  inv.connect(merger,0);
+
+  splitter.connect(inv,0);
+  splitter.connect(merger,1);
+  inv.connect(merger,1);
+
+  merger.connect(off.destination);
+  src.start();
+
+  off.startRendering().then(b=>play(b,instOut));
 };
 
-/* -------- Piano melody (simple pitch tracker) -------- */
-document.getElementById("pianoBtn").onclick = () => {
-  const oscCtx = new OfflineAudioContext(1, buffer.length, buffer.sampleRate);
-  const osc = oscCtx.createOscillator();
-  osc.type = "sine";
+/* -------- MOVING PIANO MELODY -------- */
+piano.onclick = ()=>{
+  const off = new OfflineAudioContext(1, buffer.length, buffer.sampleRate);
+  const data = buffer.getChannelData(0);
+  let t = 0;
 
-  const gain = oscCtx.createGain();
-  gain.gain.value = 0.15;
+  for(let i=0;i<data.length;i+=buffer.sampleRate/4){
+    const slice = data.slice(i,i+1000);
+    const energy = slice.reduce((a,b)=>a+Math.abs(b),0)/slice.length;
+    const freq = 220 + energy*800;
 
-  osc.connect(gain);
-  gain.connect(oscCtx.destination);
+    const osc = off.createOscillator();
+    osc.type="triangle";
+    osc.frequency.setValueAtTime(freq,t);
 
-  osc.frequency.setValueAtTime(440,0); // placeholder melody
-  osc.start();
-  osc.stop(buffer.duration);
+    const g = off.createGain();
+    g.gain.setValueAtTime(0.2,t);
+    g.gain.exponentialRampToValueAtTime(0.001,t+0.25);
 
-  oscCtx.startRendering().then(rendered => {
-    playBuffer(rendered, "pianoAudio");
-  });
+    osc.connect(g).connect(off.destination);
+    osc.start(t);
+    osc.stop(t+0.25);
+
+    t+=0.25;
+  }
+
+  off.startRendering().then(b=>play(b,pianoOut));
 };
 
-/* -------- Helper -------- */
-function playBuffer(buf, elementId) {
-  const source = audioCtx.createBufferSource();
-  source.buffer = buf;
-  const dest = audioCtx.createMediaStreamDestination();
-  source.connect(dest);
-  source.start();
-
-  const audio = document.getElementById(elementId);
-  audio.srcObject = dest.stream;
+function play(buf,el){
+  const s = ctx.createBufferSource();
+  s.buffer = buf;
+  const d = ctx.createMediaStreamDestination();
+  s.connect(d);
+  s.start();
+  el.srcObject = d.stream;
 }
 </script>
 </body>
