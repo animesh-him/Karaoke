@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Audio Converter</title>
+<title>Instrumental Maker</title>
 
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&family=Pacifico&display=swap" rel="stylesheet">
 
@@ -12,7 +12,7 @@ body{
   margin:0;
   min-height:100vh;
   font-family:Poppins,sans-serif;
-  color:white;
+  color:#fff;
   background:linear-gradient(270deg,#ff00cc,#3333ff,#00ffd5);
   background-size:600% 600%;
   animation:bg 12s ease infinite;
@@ -35,12 +35,15 @@ button,input{
 button{
   padding:12px;
   border:none;
-  border-radius:20px;
+  border-radius:22px;
   background:rgba(255,255,255,.2);
   color:white;
   font-size:14px;
 }
-audio{width:100%}
+audio{
+  width:100%;
+  margin-top:10px;
+}
 .footer{
   margin-top:25px;
   font-family:Pacifico,cursive;
@@ -51,93 +54,105 @@ audio{width:100%}
 
 <body>
 <div class="container">
-  <h2>Instrumental & Piano Converter</h2>
+  <h2>Instrumental Creator</h2>
+
   <input type="file" id="file" accept="audio/*">
-  <button id="inst" disabled>Create Instrumental</button>
-  <audio id="instOut" controls></audio>
-  <button id="piano" disabled>Create Piano Version</button>
-  <audio id="pianoOut" controls></audio>
+
+  <button id="create" disabled>Create Instrumental</button>
+
+  <audio id="output" controls></audio>
+
   <div class="footer"><i>created by Animesh</i></div>
 </div>
 
 <script>
-const ctx = new AudioContext();
-let buffer;
+let audioCtx;
+let sourceBuffer;
 
-file.onchange = async e=>{
-  const arr = await e.target.files[0].arrayBuffer();
-  buffer = await ctx.decodeAudioData(arr);
-  inst.disabled = piano.disabled = false;
-};
+file.addEventListener("change", async e=>{
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  const arrayBuffer = await e.target.files[0].arrayBuffer();
+  sourceBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+  create.disabled = false;
+});
 
-/* -------- REAL MID/SIDE VOCAL REDUCTION -------- */
-inst.onclick = ()=>{
-  const off = new OfflineAudioContext(
-    2, buffer.length, buffer.sampleRate
-  );
+create.addEventListener("click", async ()=>{
+  // REQUIRED for mobile browsers
+  await audioCtx.resume();
 
-  const src = off.createBufferSource();
-  src.buffer = buffer;
+  const channels = sourceBuffer.numberOfChannels;
+  const length = sourceBuffer.length;
+  const rate = sourceBuffer.sampleRate;
 
-  const splitter = off.createChannelSplitter(2);
-  const merger = off.createChannelMerger(2);
+  // Always render MONO instrumental so it works everywhere
+  const offline = new OfflineAudioContext(1, length, rate);
+  const output = offline.createBuffer(1, length, rate);
 
-  src.connect(splitter);
+  const left = sourceBuffer.getChannelData(0);
+  const right = channels > 1 ? sourceBuffer.getChannelData(1) : left;
 
-  // L - R
-  const inv = off.createGain();
-  inv.gain.value = -1;
+  const out = output.getChannelData(0);
 
-  splitter.connect(inv,1);
-  splitter.connect(merger,0);
-  inv.connect(merger,0);
-
-  splitter.connect(inv,0);
-  splitter.connect(merger,1);
-  inv.connect(merger,1);
-
-  merger.connect(off.destination);
-  src.start();
-
-  off.startRendering().then(b=>play(b,instOut));
-};
-
-/* -------- MOVING PIANO MELODY -------- */
-piano.onclick = ()=>{
-  const off = new OfflineAudioContext(1, buffer.length, buffer.sampleRate);
-  const data = buffer.getChannelData(0);
-  let t = 0;
-
-  for(let i=0;i<data.length;i+=buffer.sampleRate/4){
-    const slice = data.slice(i,i+1000);
-    const energy = slice.reduce((a,b)=>a+Math.abs(b),0)/slice.length;
-    const freq = 220 + energy*800;
-
-    const osc = off.createOscillator();
-    osc.type="triangle";
-    osc.frequency.setValueAtTime(freq,t);
-
-    const g = off.createGain();
-    g.gain.setValueAtTime(0.2,t);
-    g.gain.exponentialRampToValueAtTime(0.001,t+0.25);
-
-    osc.connect(g).connect(off.destination);
-    osc.start(t);
-    osc.stop(t+0.25);
-
-    t+=0.25;
+  // CENTER CANCELLATION (L - R)
+  for(let i=0;i<length;i++){
+    out[i] = (left[i] - right[i]) * 0.7;
   }
 
-  off.startRendering().then(b=>play(b,pianoOut));
-};
+  const src = offline.createBufferSource();
+  src.buffer = output;
+  src.connect(offline.destination);
+  src.start();
 
-function play(buf,el){
-  const s = ctx.createBufferSource();
-  s.buffer = buf;
-  const d = ctx.createMediaStreamDestination();
-  s.connect(d);
-  s.start();
-  el.srcObject = d.stream;
+  const rendered = await offline.startRendering();
+  const wavBlob = bufferToWav(rendered);
+
+  outputAudio(wavBlob);
+});
+
+/* -------- WAV ENCODER (RELIABLE PLAYBACK) -------- */
+function bufferToWav(buffer){
+  const numChannels = buffer.numberOfChannels;
+  const sampleRate = buffer.sampleRate;
+  const samples = buffer.getChannelData(0);
+  const length = samples.length;
+
+  const bufferArray = new ArrayBuffer(44 + length * 2);
+  const view = new DataView(bufferArray);
+
+  function writeString(offset, str){
+    for(let i=0;i<str.length;i++){
+      view.setUint8(offset+i, str.charCodeAt(i));
+    }
+  }
+
+  writeString(0,"RIFF");
+  view.setUint32(4,36 + length*2,true);
+  writeString(8,"WAVE");
+  writeString(12,"fmt ");
+  view.setUint32(16,16,true);
+  view.setUint16(20,1,true);
+  view.setUint16(22,numChannels,true);
+  view.setUint32(24,sampleRate,true);
+  view.setUint32(28,sampleRate*numChannels*2,true);
+  view.setUint16(32,numChannels*2,true);
+  view.setUint16(34,16,true);
+  writeString(36,"data");
+  view.setUint32(40,length*2,true);
+
+  let offset = 44;
+  for(let i=0;i<length;i++){
+    let s = Math.max(-1,Math.min(1,samples[i]));
+    view.setInt16(offset, s<0?s*0x8000:s*0x7fff, true);
+    offset += 2;
+  }
+
+  return new Blob([view], {type:"audio/wav"});
+}
+
+function outputAudio(blob){
+  const url = URL.createObjectURL(blob);
+  output.src = url;
+  output.load();
 }
 </script>
 </body>
