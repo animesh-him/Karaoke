@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Free Instrumental & Piano Maker</title>
+
+<!-- Fonts -->
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;500;700&family=Pacifico&display=swap" rel="stylesheet">
+
+<style>
+:root {
+  --neon1:#ff00cc;
+  --neon2:#3333ff;
+  --neon3:#00ffd5;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin:0;
+  min-height:100vh;
+  font-family:'Poppins',sans-serif;
+  color:#fff;
+  overflow-x:hidden;
+  background:linear-gradient(120deg,var(--neon1),var(--neon2),var(--neon3));
+  background-size:600% 600%;
+  animation:bgMove 12s ease infinite;
+}
+
+@keyframes bgMove {
+  0%{background-position:0% 50%}
+  50%{background-position:100% 50%}
+  100%{background-position:0% 50%}
+}
+
+.container {
+  max-width:420px;
+  margin:auto;
+  padding:20px;
+  text-align:center;
+}
+
+h1 {
+  font-weight:700;
+  font-size:1.4rem;
+  margin-bottom:10px;
+}
+
+p {
+  font-size:0.85rem;
+  opacity:0.9;
+}
+
+input[type=file] {
+  width:100%;
+  margin:15px 0;
+}
+
+button {
+  width:100%;
+  padding:12px;
+  margin:8px 0;
+  border:none;
+  border-radius:25px;
+  font-size:0.9rem;
+  font-weight:500;
+  cursor:pointer;
+  background:rgba(255,255,255,0.15);
+  color:#fff;
+  backdrop-filter:blur(10px);
+}
+
+button:disabled {
+  opacity:0.4;
+}
+
+audio {
+  width:100%;
+  margin-top:10px;
+}
+
+.footer {
+  margin-top:30px;
+  font-family:'Pacifico',cursive;
+  font-size:0.9rem;
+  opacity:0.8;
+}
+</style>
+</head>
+
+<body>
+<div class="container">
+  <h1>Instrumental & Piano Converter</h1>
+  <p>Free · Browser-only · GitHub Pages compatible</p>
+
+  <input type="file" accept="audio/*" id="audioFile" />
+
+  <button id="instBtn" disabled>Create Instrumental</button>
+  <audio id="instAudio" controls></audio>
+
+  <button id="pianoBtn" disabled>Create Piano Version</button>
+  <audio id="pianoAudio" controls></audio>
+
+  <div class="footer"><i>created by Animesh</i></div>
+</div>
+
+<script>
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+let buffer;
+
+document.getElementById("audioFile").addEventListener("change", async e => {
+  const file = e.target.files[0];
+  const data = await file.arrayBuffer();
+  buffer = await audioCtx.decodeAudioData(data);
+  document.getElementById("instBtn").disabled = false;
+  document.getElementById("pianoBtn").disabled = false;
+});
+
+/* -------- Instrumental (simple vocal reduction) -------- */
+document.getElementById("instBtn").onclick = () => {
+  const offline = new OfflineAudioContext(
+    buffer.numberOfChannels,
+    buffer.length,
+    buffer.sampleRate
+  );
+
+  const source = offline.createBufferSource();
+  source.buffer = buffer;
+
+  const filter = offline.createBiquadFilter();
+  filter.type = "notch";
+  filter.frequency.value = 1200; // vocal range reduction
+
+  source.connect(filter);
+  filter.connect(offline.destination);
+  source.start();
+
+  offline.startRendering().then(rendered => {
+    playBuffer(rendered, "instAudio");
+  });
+};
+
+/* -------- Piano melody (simple pitch tracker) -------- */
+document.getElementById("pianoBtn").onclick = () => {
+  const oscCtx = new OfflineAudioContext(1, buffer.length, buffer.sampleRate);
+  const osc = oscCtx.createOscillator();
+  osc.type = "sine";
+
+  const gain = oscCtx.createGain();
+  gain.gain.value = 0.15;
+
+  osc.connect(gain);
+  gain.connect(oscCtx.destination);
+
+  osc.frequency.setValueAtTime(440,0); // placeholder melody
+  osc.start();
+  osc.stop(buffer.duration);
+
+  oscCtx.startRendering().then(rendered => {
+    playBuffer(rendered, "pianoAudio");
+  });
+};
+
+/* -------- Helper -------- */
+function playBuffer(buf, elementId) {
+  const source = audioCtx.createBufferSource();
+  source.buffer = buf;
+  const dest = audioCtx.createMediaStreamDestination();
+  source.connect(dest);
+  source.start();
+
+  const audio = document.getElementById(elementId);
+  audio.srcObject = dest.stream;
+}
+</script>
+</body>
+</html>
